@@ -1,38 +1,32 @@
 from flask import Flask, request, jsonify
-import psycopg2  # <-- psycopg2 (v2), не psycopg
+import psycopg  
 import os
-from urllib.parse import urlparse
 
 app = Flask(__name__)
 
-# Подключение к БД
+# Подключение к БД (прямо из env-var)
 DATABASE_URL = os.environ.get('DATABASE_URL')
 conn = None
 if DATABASE_URL:
     try:
-        url = urlparse(DATABASE_URL)
-        conn = psycopg2.connect(
-            database=url.path[1:],  # <-- Убираем слеш: /dbname -> dbname
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port
-        )
+        conn = psycopg.connect(DATABASE_URL)  # <-- Прямо строка URL для v3
+        print("DB connected successfully")  # Для логов Render
     except Exception as e:
-        print(f"DB connection failed: {e}")  # Для логов Render
+        print(f"DB connection failed: {e}")  # Для отладки
         conn = None
 
 # Создание таблицы при старте
 if conn:
-    with conn.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id SERIAL PRIMARY KEY,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        conn.commit()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    conn.commit()
+    cur.close()
 
 @app.route('/')
 def hello():
@@ -55,9 +49,10 @@ def save_message():
     data = request.get_json()
     message = data.get('message', '') if data else ''
 
-    with conn.cursor() as cur:
-        cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
-        conn.commit()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO messages (content) VALUES (%s)", (message,))
+    conn.commit()
+    cur.close()
 
     return jsonify({"status": "saved", "message": message})
 
@@ -66,9 +61,10 @@ def get_messages():
     if not conn:
         return jsonify({"error": "DB not connected"}), 500
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10")
-        rows = cur.fetchall()
+    cur = conn.cursor()
+    cur.execute("SELECT id, content, created_at FROM messages ORDER BY id DESC LIMIT 10")
+    rows = cur.fetchall()
+    cur.close()
 
     messages = [{"id": r[0], "text": r[1], "time": r[2].isoformat()} for r in rows]
     return jsonify(messages)
